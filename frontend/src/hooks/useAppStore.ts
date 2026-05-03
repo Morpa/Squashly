@@ -4,6 +4,7 @@ import {
   type Commit,
   type RepoInfo,
   type SquashResult,
+  type PushResult,
 } from "@/lib/wails";
 
 export type AppView = "welcome" | "main";
@@ -25,12 +26,15 @@ export function useAppStore() {
   const [loading, setLoading] = useState(false);
   const [squashing, setSquashing] = useState(false);
   const [squashResult, setSquashResult] = useState<SquashResult | null>(null);
+  const [pushResult, setPushResult] = useState<PushResult | null>(null);
+  const [pushing, setPushing] = useState(false);
   const [commitLimit, setCommitLimitState] = useState(30);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // Refs prevent stale closures in async callbacks
   const repoPathRef = useRef("");
   const commitLimitRef = useRef(30);
+  const commitsRef = useRef<Commit[]>([]);
 
   const addToast = useCallback(
     (type: ToastType, title: string, message?: string) => {
@@ -51,6 +55,7 @@ export function useAppStore() {
   // Core fetch — always reads from refs so never stale
   const fetchCommits = useCallback(async (path: string, limit: number) => {
     const cmts = await wails.getCommits(path, limit);
+    commitsRef.current = cmts;
     setCommits(cmts);
     setSelectedHashes(new Set());
   }, []);
@@ -73,6 +78,7 @@ export function useAppStore() {
           wails.getCommits(path, commitLimitRef.current),
         ]);
         repoPathRef.current = path;
+        commitsRef.current = cmts;
         setRepoPath(path);
         setRepoInfo(info);
         setCommits(cmts);
@@ -85,7 +91,7 @@ export function useAppStore() {
         setLoading(false);
       }
     },
-    [addToast, fetchCommits],
+    [addToast],
   );
 
   const refreshCommits = useCallback(async () => {
@@ -119,23 +125,43 @@ export function useAppStore() {
     if (path) await loadRepo(path);
   }, [loadRepo]);
 
+  // Toggle a commit and auto-fill any gaps so the selection is always
+  // a contiguous block — required by git reset --soft HEAD~N.
+  // Uses commitsRef to read current commits without stale closures.
   const toggleCommit = useCallback((hash: string) => {
     setSelectedHashes((prev) => {
       const next = new Set(prev);
-      if (next.has(hash)) next.delete(hash);
-      else next.add(hash);
+      if (next.has(hash)) {
+        next.delete(hash);
+      } else {
+        next.add(hash);
+      }
+
+      // Fill gaps between min and max selected index
+      if (next.size >= 2) {
+        const currentCommits = commitsRef.current;
+        const indices = currentCommits
+          .map((c, i) => (next.has(c.hash) ? i : -1))
+          .filter((i) => i !== -1);
+        const minIdx = Math.min(...indices);
+        const maxIdx = Math.max(...indices);
+        for (let i = minIdx; i <= maxIdx; i++) {
+          next.add(currentCommits[i].hash);
+        }
+      }
+
       return next;
     });
   }, []);
 
-  // Use functional setState to read latest commits without a dependency
+  // Shift+click range select
   const selectRange = useCallback((startIdx: number, endIdx: number) => {
-    setCommits((prev) => {
-      const [from, to] =
-        startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
-      setSelectedHashes(new Set(prev.slice(from, to + 1).map((c) => c.hash)));
-      return prev;
-    });
+    const currentCommits = commitsRef.current;
+    const [from, to] =
+      startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
+    setSelectedHashes(
+      new Set(currentCommits.slice(from, to + 1).map((c) => c.hash)),
+    );
   }, []);
 
   const clearSelection = useCallback(() => setSelectedHashes(new Set()), []);
@@ -196,6 +222,33 @@ export function useAppStore() {
     [addToast, fetchCommits],
   );
 
+  const push = useCallback(async () => {
+    const path = repoPathRef.current;
+    if (!path) return;
+    setPushing(true);
+    setPushResult(null);
+    try {
+      const result = await wails.pushForceWithLease(path);
+      setPushResult(result);
+      if (result.success) {
+        addToast("success", "Push complete!", result.message);
+      } else {
+        addToast("error", "Push failed", result.errorMsg ?? "Unknown error");
+      }
+    } catch (e) {
+      addToast("error", "Push failed", String(e));
+    } finally {
+      setPushing(false);
+    }
+  }, [addToast]);
+
+  // Reset everything after a squash+push cycle so the user can start fresh
+  const resetSquash = useCallback(() => {
+    setSquashResult(null);
+    setPushResult(null);
+    setSelectedHashes(new Set());
+  }, []);
+
   const selectedCommits = commits.filter((c) => selectedHashes.has(c.hash));
 
   return {
@@ -208,6 +261,8 @@ export function useAppStore() {
     loading,
     squashing,
     squashResult,
+    pushing,
+    pushResult,
     commitLimit,
     toasts,
     setCommitLimit,
@@ -218,6 +273,8 @@ export function useAppStore() {
     selectRange,
     clearSelection,
     squash,
+    push,
+    resetSquash,
     addToast,
     removeToast,
     setView,

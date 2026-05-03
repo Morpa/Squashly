@@ -7,7 +7,6 @@ export interface Commit {
   email: string;
   date: string;
   body: string;
-  selected?: boolean;
 }
 
 export interface Branch {
@@ -38,21 +37,48 @@ export interface SquashResult {
   errorMsg?: string;
 }
 
-// Wails runtime bindings - these are injected at runtime by Wails
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-declare const window: any;
+export interface PushResult {
+  success: boolean;
+  remote: string;
+  branch: string;
+  message: string;
+  errorMsg?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Wails runtime bridge
+//
+// Wails injects `window.go.app.App` at runtime with all bound methods.
+// We check for each method individually so that if a new method was added
+// but the app hasn't been rebuilt yet, it falls through to the mock
+// instead of throwing "is not a function".
+// ---------------------------------------------------------------------------
+
+function getWailsMethod(
+  method: string,
+): ((...args: unknown[]) => Promise<unknown>) | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fn = (window as any)?.go?.app?.App?.[method];
+    if (typeof fn === "function") return fn;
+  } catch {
+    // not running inside Wails
+  }
+  return null;
+}
 
 function wailsCall<T>(method: string, ...args: unknown[]): Promise<T> {
-  if (typeof window.go !== "undefined") {
-    return window.go.app.App[method](...args);
-  }
-  // Dev mock
+  const fn = getWailsMethod(method);
+  if (fn) return fn(...args) as Promise<T>;
   return mockApi(method, ...args) as Promise<T>;
 }
 
-// Mock data for browser development
+// ---------------------------------------------------------------------------
+// Dev mock — used in the browser when wailsjs bindings are not available
+// ---------------------------------------------------------------------------
 function mockApi(method: string, ...args: unknown[]): unknown {
   console.log("[mock]", method, args);
+
   const mockCommits: Commit[] = Array.from({ length: 20 }, (_, i) => ({
     hash: `abc${i}def${i}123456`,
     shortHash: `abc${i}def`,
@@ -71,11 +97,7 @@ function mockApi(method: string, ...args: unknown[]): unknown {
     author: "Alex Mercer",
     email: "alex@example.com",
     date: new Date(Date.now() - i * 3600000 * 6).toISOString(),
-    body:
-      i % 3 === 0
-        ? "This is an extended commit body with more detail about what changed and why."
-        : "",
-    selected: false,
+    body: i % 3 === 0 ? "Extended commit body with more detail." : "",
   }));
 
   switch (method) {
@@ -95,34 +117,52 @@ function mockApi(method: string, ...args: unknown[]): unknown {
       return Promise.resolve([
         { name: "main", isCurrent: false, isRemote: false },
         { name: "feature/auth-refactor", isCurrent: true, isRemote: false },
-        { name: "fix/payment-bug", isCurrent: false, isRemote: false },
       ] as Branch[]);
     case "SquashCommits":
-      return new Promise((resolve) =>
+      return new Promise((r) =>
         setTimeout(
           () =>
-            resolve({
+            r({
               success: true,
               newHash: "f3a9b2c",
-              message: "Successfully squashed commits",
+              message: "Squashed 2 commits → f3a9b2c",
             } as SquashResult),
-          1200,
+          1000,
+        ),
+      );
+    case "PushForceWithLease":
+      return new Promise((r) =>
+        setTimeout(
+          () =>
+            r({
+              success: true,
+              remote: "origin",
+              branch: "feature/auth-refactor",
+              message:
+                "Force-pushed feature/auth-refactor → origin/feature/auth-refactor",
+            } as PushResult),
+          800,
         ),
       );
     case "OpenFolderDialog":
       return Promise.resolve("/Users/alex/projects/my-awesome-project");
     default:
-      return Promise.reject(new Error(`Unknown method: ${method}`));
+      return Promise.reject(new Error(`Unknown mock method: ${method}`));
   }
 }
 
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 export const wails = {
   validateRepo: (path: string) => wailsCall<boolean>("ValidateRepo", path),
   getRepoInfo: (path: string) => wailsCall<RepoInfo>("GetRepoInfo", path),
-  getCommits: (path: string, limit: number) =>
-    wailsCall<Commit[]>("GetCommits", path, limit),
+  getCommits: (path: string, n: number) =>
+    wailsCall<Commit[]>("GetCommits", path, n),
   getBranches: (path: string) => wailsCall<Branch[]>("GetBranches", path),
   squashCommits: (req: SquashRequest) =>
     wailsCall<SquashResult>("SquashCommits", req),
+  pushForceWithLease: (path: string) =>
+    wailsCall<PushResult>("PushForceWithLease", path),
   openFolderDialog: () => wailsCall<string>("OpenFolderDialog"),
 };

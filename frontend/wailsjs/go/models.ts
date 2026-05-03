@@ -25,7 +25,6 @@ export namespace git {
 	    // Go type: time
 	    date: any;
 	    body: string;
-	    selected: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Commit(source);
@@ -40,7 +39,6 @@ export namespace git {
 	        this.email = source["email"];
 	        this.date = this.convertValues(source["date"], null);
 	        this.body = source["body"];
-	        this.selected = source["selected"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -60,6 +58,26 @@ export namespace git {
 		    }
 		    return a;
 		}
+	}
+	export class PushResult {
+	    success: boolean;
+	    remote: string;
+	    branch: string;
+	    message: string;
+	    errorMsg?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PushResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.success = source["success"];
+	        this.remote = source["remote"];
+	        this.branch = source["branch"];
+	        this.message = source["message"];
+	        this.errorMsg = source["errorMsg"];
+	    }
 	}
 	export class RepoInfo {
 	    path: string;

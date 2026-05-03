@@ -22,6 +22,10 @@ export function OpenFolderDialog() {
   return window['go']['app']['App']['OpenFolderDialog']();
 }
 
+export function PushForceWithLease(arg1) {
+  return window['go']['app']['App']['PushForceWithLease'](arg1);
+}
+
 export function SquashCommits(arg1) {
   return window['go']['app']['App']['SquashCommits'](arg1);
 }

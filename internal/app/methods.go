@@ -38,3 +38,8 @@ func (a *App) GetRepoInfo(repoPath string) (*git.RepoInfo, error) {
 func (a *App) OpenFolderDialog() (string, error) {
 	return openFolderDialog(a.ctx)
 }
+
+// PushForceWithLease pushes the current branch using --force-with-lease.
+func (a *App) PushForceWithLease(repoPath string) (*git.PushResult, error) {
+	return a.gitSvc.PushForceWithLease(repoPath)
+}

@@ -12,6 +12,8 @@ export function GetRepoInfo(arg1:string):Promise<git.RepoInfo>;
 
 export function OpenFolderDialog():Promise<string>;
 
+export function PushForceWithLease(arg1:string):Promise<git.PushResult>;
+
 export function SquashCommits(arg1:git.SquashRequest):Promise<git.SquashResult>;
 
 export function ValidateRepo(arg1:string):Promise<boolean>;

@@ -11,7 +11,6 @@ type Commit struct {
 	Email     string    `json:"email"`
 	Date      time.Time `json:"date"`
 	Body      string    `json:"body"`
-	Selected  bool      `json:"selected"`
 }
 
 // Branch represents a git branch.
@@ -23,17 +22,19 @@ type Branch struct {
 
 // RepoInfo contains metadata about a git repository.
 type RepoInfo struct {
-	Path          string `json:"path"`
-	Name          string `json:"name"`
-	CurrentBranch string `json:"currentBranch"`
-	TotalCommits  int    `json:"totalCommits"`
-	HasUncommited bool   `json:"hasUncommitted"`
+	Path           string `json:"path"`
+	Name           string `json:"name"`
+	CurrentBranch  string `json:"currentBranch"`
+	TotalCommits   int    `json:"totalCommits"`
+	HasUncommitted bool   `json:"hasUncommitted"` // fixed: was HasUncommited (typo)
 }
 
 // SquashRequest is the payload sent from the frontend to squash commits.
+// CommitHashes are in log order (newest first). The service uses len() for
+// HEAD~N and validates contiguity — no need to sort on the frontend.
 type SquashRequest struct {
 	RepoPath     string   `json:"repoPath"`
-	CommitHashes []string `json:"commitHashes"` // ordered oldest→newest
+	CommitHashes []string `json:"commitHashes"`
 	Message      string   `json:"message"`
 	Body         string   `json:"body"`
 }
@@ -42,6 +43,15 @@ type SquashRequest struct {
 type SquashResult struct {
 	Success  bool   `json:"success"`
 	NewHash  string `json:"newHash"`
+	Message  string `json:"message"`
+	ErrorMsg string `json:"errorMsg,omitempty"`
+}
+
+// PushResult is the result of a push --force-with-lease operation.
+type PushResult struct {
+	Success  bool   `json:"success"`
+	Remote   string `json:"remote"`
+	Branch   string `json:"branch"`
 	Message  string `json:"message"`
 	ErrorMsg string `json:"errorMsg,omitempty"`
 }

@@ -14,10 +14,7 @@ import (
 // Service handles all git operations.
 type Service struct{}
 
-// NewService creates a new Git Service.
-func NewService() *Service {
-	return &Service{}
-}
+func NewService() *Service { return &Service{} }
 
 // ValidateRepo checks whether the given path is a valid git repository.
 func (s *Service) ValidateRepo(repoPath string) (bool, error) {
@@ -45,18 +42,17 @@ func (s *Service) GetRepoInfo(repoPath string) (*RepoInfo, error) {
 	count, _ := strconv.Atoi(strings.TrimSpace(countOut))
 
 	statusOut, _ := s.run(repoPath, "status", "--porcelain")
-	hasUncommitted := strings.TrimSpace(statusOut) != ""
 
 	return &RepoInfo{
-		Path:          repoPath,
-		Name:          filepath.Base(repoPath),
-		CurrentBranch: branch,
-		TotalCommits:  count,
-		HasUncommited: hasUncommitted,
+		Path:           repoPath,
+		Name:           filepath.Base(repoPath),
+		CurrentBranch:  branch,
+		TotalCommits:   count,
+		HasUncommitted: strings.TrimSpace(statusOut) != "",
 	}, nil
 }
 
-// GetCurrentBranch returns the name of the currently checked-out branch.
+// GetCurrentBranch returns the current branch name.
 func (s *Service) GetCurrentBranch(repoPath string) (string, error) {
 	out, err := s.run(repoPath, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
@@ -91,7 +87,7 @@ func (s *Service) GetBranches(repoPath string) ([]Branch, error) {
 	return branches, nil
 }
 
-// GetCommits returns a list of commits for the current branch.
+// GetCommits returns commits for the current branch.
 func (s *Service) GetCommits(repoPath string, limit int) ([]Commit, error) {
 	if limit <= 0 {
 		limit = 50
@@ -109,18 +105,19 @@ func (s *Service) GetCommits(repoPath string, limit int) ([]Commit, error) {
 	}
 
 	var commits []Commit
-	entries := strings.Split(out, "---END---")
-	for _, entry := range entries {
+	for _, entry := range strings.Split(out, "---END---") {
 		entry = strings.TrimSpace(entry)
 		if entry == "" {
 			continue
 		}
+
 		parts := strings.Split(entry, sep)
 		if len(parts) < 7 {
 			continue
 		}
 
 		t, _ := time.Parse(time.RFC3339, strings.TrimSpace(parts[5]))
+
 		commits = append(commits, Commit{
 			Hash:      strings.TrimSpace(parts[0]),
 			ShortHash: strings.TrimSpace(parts[1]),
@@ -131,62 +128,134 @@ func (s *Service) GetCommits(repoPath string, limit int) ([]Commit, error) {
 			Body:      strings.TrimSpace(parts[6]),
 		})
 	}
+
 	return commits, nil
 }
 
-// SquashCommits performs the squash operation using git rebase.
-// It squashes the selected commits (oldest→newest) into a single commit.
+// SquashCommits squashes N commits into one.
 func (s *Service) SquashCommits(req SquashRequest) (*SquashResult, error) {
-	if len(req.CommitHashes) < 2 {
-		return nil, errors.New("need at least 2 commits to squash")
+	n := len(req.CommitHashes)
+	if n < 2 {
+		return nil, errors.New("select at least 2 commits to squash")
 	}
 
-	// Find the parent of the oldest commit (last in the slice since log is newest-first)
-	oldestHash := req.CommitHashes[len(req.CommitHashes)-1]
+	statusOut, _ := s.run(req.RepoPath, "status", "--porcelain")
+	if strings.TrimSpace(statusOut) != "" {
+		return nil, errors.New("repo has uncommitted changes")
+	}
 
-	parentOut, err := s.run(req.RepoPath, "rev-parse", oldestHash+"^")
+	logOut, err := s.run(req.RepoPath, "log",
+		fmt.Sprintf("-n%d", n),
+		"--pretty=format:%H",
+	)
 	if err != nil {
-		return nil, fmt.Errorf("finding parent commit: %w", err)
-	}
-	parentHash := strings.TrimSpace(parentOut)
-
-	// Use soft reset to the parent, then create a new commit
-	if _, err := s.run(req.RepoPath, "reset", "--soft", parentHash); err != nil {
-		return nil, fmt.Errorf("resetting to parent: %w", err)
+		return nil, err
 	}
 
-	commitMsg := req.Message
+	topHashes := strings.Fields(strings.TrimSpace(logOut))
+	selected := make(map[string]bool)
+
+	for _, h := range req.CommitHashes {
+		selected[h] = true
+	}
+
+	for _, h := range topHashes {
+		if !selected[h] {
+			return nil, errors.New("selected commits must be contiguous from HEAD")
+		}
+	}
+
+	if _, err := s.run(req.RepoPath, "reset", "--soft",
+		fmt.Sprintf("HEAD~%d", n)); err != nil {
+		return nil, err
+	}
+
+	msg := req.Message
 	if req.Body != "" {
-		commitMsg = req.Message + "\n\n" + req.Body
+		msg += "\n\n" + req.Body
 	}
 
-	if _, err := s.run(req.RepoPath, "commit", "-m", commitMsg); err != nil {
-		return nil, fmt.Errorf("creating squashed commit: %w", err)
+	if _, err := s.run(req.RepoPath, "commit", "-m", msg); err != nil {
+		_, _ = s.run(req.RepoPath, "reset", "--soft", "HEAD@{1}")
+		return nil, err
 	}
 
-	newHashOut, err := s.run(req.RepoPath, "rev-parse", "--short", "HEAD")
-	if err != nil {
-		return nil, fmt.Errorf("getting new commit hash: %w", err)
-	}
+	newHash, _ := s.run(req.RepoPath, "rev-parse", "--short", "HEAD")
 
 	return &SquashResult{
 		Success: true,
-		NewHash: strings.TrimSpace(newHashOut),
-		Message: fmt.Sprintf("Successfully squashed %d commits into %s", len(req.CommitHashes), strings.TrimSpace(newHashOut)),
+		NewHash: strings.TrimSpace(newHash),
 	}, nil
 }
 
-// run executes a git command in the given directory and returns stdout.
-func (s *Service) run(dir string, args ...string) (string, error) {
+// PushForceWithLease
+func (s *Service) PushForceWithLease(repoPath string) (*PushResult, error) {
+	branch, err := s.GetCurrentBranch(repoPath)
+	if err != nil {
+		return nil, err
+	}
+
+	remote := "origin"
+
+	// 🔥 1. Sempre sincroniza refs remotas (boa prática)
+	if _, err := s.run(repoPath, "fetch", remote, branch); err != nil {
+		return nil, fmt.Errorf("fetch failed: %w", err)
+	}
+
+	// 🔍 2. Detecta estado
+	out, err := s.run(repoPath, "rev-list", "--left-right", "--count",
+		fmt.Sprintf("HEAD...%s/%s", remote, branch))
+	if err != nil {
+		return nil, fmt.Errorf("checking status: %w", err)
+	}
+
+	parts := strings.Fields(out)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("unexpected rev-list output: %s", out)
+	}
+
+	ahead, _ := strconv.Atoi(parts[0])
+	behind, _ := strconv.Atoi(parts[1])
+
+	out, err = s.exec(repoPath, true, "push", "--force-with-lease", remote, branch)
+	if err != nil {
+		return nil, fmt.Errorf("push failed: %s", out)
+	}
+
+	return &PushResult{
+		Success: true,
+		Message: fmt.Sprintf("Push OK (force-with-lease) — ahead:%d, behind:%d", ahead, behind),
+	}, nil
+}
+
+// exec runs a git command. If combined is true, stdout and stderr are merged.
+func (s *Service) exec(dir string, combined bool, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+
+	if combined {
+		out, err := cmd.CombinedOutput()
+		res := strings.TrimSpace(string(out))
+		if err != nil {
+			return res, errors.New(res)
+		}
+		return res, nil
+	}
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("%w: %s", err, stderr.String())
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", errors.New(msg)
 	}
 	return stdout.String(), nil
+}
+
+// run is a shorthand for exec without combined output.
+func (s *Service) run(dir string, args ...string) (string, error) {
+	return s.exec(dir, false, args...)
 }
