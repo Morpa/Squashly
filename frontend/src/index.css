@@ -1,0 +1,175 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  color-scheme: dark;
+  --radius: 0.625rem;
+
+  /* Squashly dark theme — always dark, no light mode */
+  --background: #080810;
+  --foreground: #e8e8f0;
+  --card: #0f0f1a;
+  --card-foreground: #e8e8f0;
+  --popover: #13131f;
+  --popover-foreground: #e8e8f0;
+  --primary: #7c6af7;
+  --primary-foreground: #ffffff;
+  --secondary: #1a1a2e;
+  --secondary-foreground: #e8e8f0;
+  --muted: #1a1a2e;
+  --muted-foreground: #8888aa;
+  --accent: #7c6af7;
+  --accent-foreground: #ffffff;
+  --destructive: #f87171;
+  --border: #252540;
+  --input: #1a1a2e;
+  --ring: #7c6af7;
+
+  /* App-specific tokens */
+  --bg-elevated: #1a1a2e;
+  --border-subtle: #1c1c32;
+  --accent-light: #9d8fff;
+  --accent-glow: rgba(124, 106, 247, 0.15);
+  --accent-glow-strong: rgba(124, 106, 247, 0.35);
+  --green: #4ade80;
+  --green-dim: rgba(74, 222, 128, 0.12);
+  --amber: #fbbf24;
+  --amber-dim: rgba(251, 191, 36, 0.12);
+  --macos-traffic-lights: 80px;
+}
+
+html,
+body,
+#root {
+  background-color: #080810 !important;
+  color: #e8e8f0 !important;
+  height: 100%;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "Syne", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+
+textarea,
+input,
+select {
+  user-select: text;
+}
+
+.commit-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 0.875rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.1s ease;
+  border: 1px solid transparent;
+}
+.commit-row:hover {
+  background: var(--bg-elevated);
+  border-color: var(--border);
+}
+.commit-row.selected {
+  background: var(--accent-glow);
+  border-color: rgba(124, 106, 247, 0.3);
+}
+.commit-row.selected:hover {
+  background: var(--accent-glow-strong);
+}
+
+.hash-badge {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.68rem;
+  color: var(--accent-light);
+  background: var(--accent-glow);
+  border: 1px solid rgba(124, 106, 247, 0.2);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.titlebar-drag {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.animate-fade-in {
+  animation: fadeIn 0.25s ease forwards;
+}
+.animate-slide-in {
+  animation: slideIn 0.2s ease forwards;
+}
