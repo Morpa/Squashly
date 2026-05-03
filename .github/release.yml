@@ -1,0 +1,173 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*" # dispara em: git tag v1.0.0 && git push --tags
+  workflow_dispatch:
+    # permite correr manualmente no GitHub UI
+
+permissions:
+  contents: write # necessário para criar o Release e fazer upload dos artefactos
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: darwin/universal # compila para Intel + Apple Silicon num único binário
+            artifact_name: Squashly.app
+            artifact_path: build/bin/Squashly.app
+            archive_name: Squashly-${{ github.ref_name }}-macos-universal.zip
+
+          - os: windows-latest
+            platform: windows/amd64
+            artifact_name: squashly.exe
+            artifact_path: build/bin/squashly.exe
+            archive_name: Squashly-${{ github.ref_name }}-windows-amd64.zip
+
+          - os: ubuntu-latest
+            platform: linux/amd64
+            artifact_name: squashly
+            artifact_path: build/bin/squashly
+            archive_name: Squashly-${{ github.ref_name }}-linux-amd64.tar.gz
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Go ────────────────────────────────────────────────────────────────
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: go.sum
+
+      # ── Node ──────────────────────────────────────────────────────────────
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      # ── Wails CLI ─────────────────────────────────────────────────────────
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      # ── Linux deps (GTK + WebKit) ──────────────────────────────────────────
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            pkg-config \
+            libglib2.0-dev \
+            nsis
+
+      # ── macOS: instalar create-dmg para gerar .dmg ─────────────────────────
+      - name: Install create-dmg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install create-dmg
+
+      # ── Build ─────────────────────────────────────────────────────────────
+      - name: Build (macOS universal)
+        if: runner.os == 'macOS'
+        run: wails build -platform darwin/universal -clean -trimpath
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: wails build -platform windows/amd64 -clean -trimpath -nsis
+        # -nsis gera também um instalador Setup.exe via NSIS
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: wails build -platform linux/amd64 -clean -trimpath
+
+      # ── macOS: assinar e criar DMG ────────────────────────────────────────
+      # Descomenta e preenche APPLE_CERT_* nos secrets do repositório se quiseres
+      # notarizar para distribuição pública fora da App Store.
+      #
+      # - name: Sign & Notarize (macOS)
+      #   if: runner.os == 'macOS'
+      #   env:
+      #     APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      #     APPLE_ID: ${{ secrets.APPLE_ID }}
+      #     APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      #     APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      #   run: |
+      #     codesign --deep --force --verify --verbose \
+      #       --sign "$APPLE_SIGNING_IDENTITY" \
+      #       --options runtime \
+      #       build/bin/Squashly.app
+      #     xcrun notarytool submit build/bin/Squashly.app \
+      #       --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" \
+      #       --team-id "$APPLE_TEAM_ID" --wait
+
+      - name: Create DMG (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          create-dmg \
+            --volname "Squashly" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 128 \
+            --icon "Squashly.app" 175 190 \
+            --hide-extension "Squashly.app" \
+            --app-drop-link 425 190 \
+            "build/bin/Squashly-${{ github.ref_name }}-macos-universal.dmg" \
+            "build/bin/Squashly.app"
+
+      # ── Empacotar artefactos ───────────────────────────────────────────────
+      - name: Package (macOS → zip + dmg)
+        if: runner.os == 'macOS'
+        run: |
+          cd build/bin
+          zip -r "Squashly-${{ github.ref_name }}-macos-universal.zip" Squashly.app
+
+      - name: Package (Windows → zip)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cd build/bin
+          Compress-Archive -Path squashly.exe `
+            -DestinationPath "Squashly-${{ github.ref_name }}-windows-amd64.zip"
+          # O instalador NSIS fica em build/bin/squashly-*-installer.exe automaticamente
+
+      - name: Package (Linux → tar.gz)
+        if: runner.os == 'Linux'
+        run: |
+          cd build/bin
+          tar -czf "Squashly-${{ github.ref_name }}-linux-amd64.tar.gz" squashly
+
+      # ── Upload artefactos de CI (útil mesmo sem tag/release) ─────────────
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: squashly-${{ matrix.os }}
+          path: build/bin/
+          retention-days: 7
+
+      # ── Criar/actualizar GitHub Release com os binários ───────────────────
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Squashly ${{ github.ref_name }}"
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name,
+            '-rc') }}
+          generate_release_notes: true
+          files: |
+            build/bin/*.zip
+            build/bin/*.dmg
+            build/bin/*.tar.gz
+            build/bin/*installer*.exe
